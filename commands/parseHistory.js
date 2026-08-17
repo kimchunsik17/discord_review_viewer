@@ -5,19 +5,11 @@ import { categorizeBySearch, getFallbackImage } from '../utils/smartHelper.js';
 export default {
   data: new SlashCommandBuilder()
     .setName('기록불러오기')
-    .setDescription('현재 채널의 과거 채팅 기록을 분석해 리뷰 DB로 파싱합니다.')
-    .addIntegerOption(option => 
-      option.setName('개수')
-        .setDescription('가져올 과거 메시지 개수 (최대 100개, 기본 50개)')
-        .setRequired(false)
-        .setMinValue(1)
-        .setMaxValue(100)),
+    .setDescription('현재 채널의 모든 과거 채팅 기록을 100개씩 순차적으로 끝까지 조회해 파싱합니다.'),
         
   async execute(interaction) {
     // 디스코드 API 응답 지연 방지
     await interaction.deferReply();
-    
-    const limit = interaction.options.getInteger('개수') || 50;
     
     try {
       // 1. 메시지 가져오기 (100개씩 순차적으로 전체 채널 히스토리 조회)

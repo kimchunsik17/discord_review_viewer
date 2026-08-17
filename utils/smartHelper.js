@@ -1,22 +1,33 @@
 // 인터넷 검색을 활용한 카테고리 분류 (LLM 없이 단순 크롤링 및 키워드 점수 매기기)
 export const categorizeBySearch = async (title, producer) => {
   try {
-    const query = encodeURIComponent(`${title} ${producer}`);
-    // DuckDuckGo 크롤링은 차단당하기 쉬워, 무료이고 안정적인 위키백과(Wikipedia) API를 사용합니다.
-    const res = await fetch(`https://ko.wikipedia.org/w/api.php?action=query&list=search&srsearch=${query}&utf8=&format=json`, {
-      headers: {
-        'User-Agent': 'DiscordReviewBot/1.0 (Contact: user@domain.com)'
-      }
-    });
-    
-    if (!res.ok) throw new Error(`Search request failed with status: ${res.status}`);
-    
-    const data = await res.json();
-    // 검색 결과 스니펫(요약) 텍스트를 하나로 합침
-    const text = data.query.search.map(item => item.snippet).join(' ').toLowerCase();
-    
-    // API 호출 속도 조절 (rate limit 방지)
-    await new Promise(r => setTimeout(r, 300));
+    // 위키백과 검색 헬퍼 함수
+    const searchWiki = async (term) => {
+      if (!term.trim()) return '';
+      const q = encodeURIComponent(term);
+      const res = await fetch(`https://ko.wikipedia.org/w/api.php?action=query&list=search&srsearch=${q}&utf8=&format=json`, {
+        headers: { 'User-Agent': 'DiscordReviewBot/1.0' }
+      });
+      if (!res.ok) return '';
+      const data = await res.json();
+      return data.query.search.map(item => item.snippet).join(' ').toLowerCase();
+    };
+
+    // 1. 제목 + 생산자로 검색
+    let text = await searchWiki(`${title} ${producer}`);
+    await new Promise(r => setTimeout(r, 200));
+
+    // 2. 검색 결과가 너무 적으면 생산자(가수/감독/작가 등) 단독 검색 (직업을 통해 카테고리 유추)
+    if (text.length < 20 && producer) {
+      text += ' ' + await searchWiki(producer);
+      await new Promise(r => setTimeout(r, 200));
+    }
+
+    // 3. 그래도 없으면 제목 단독 검색
+    if (text.length < 20 && title) {
+      text += ' ' + await searchWiki(title);
+      await new Promise(r => setTimeout(r, 200));
+    }
     
     // 키워드 빈도수 점수 매기기
     let scores = {
@@ -48,7 +59,7 @@ export const categorizeBySearch = async (title, producer) => {
 
     // 만약 전혀 점수가 안 나왔다면, 입력된 텍스트 자체(제목/생산자)에 키워드가 있는지 한번 더 확인
     if (maxCategory === '기타') {
-      const fallbackText = query.toLowerCase();
+      const fallbackText = `${title} ${producer}`.toLowerCase();
       if (fallbackText.includes('영화') || fallbackText.includes('감독')) return '영화';
       if (fallbackText.includes('음악') || fallbackText.includes('앨범') || fallbackText.includes('노래')) return '음악';
       if (fallbackText.includes('책') || fallbackText.includes('도서')) return '도서';
