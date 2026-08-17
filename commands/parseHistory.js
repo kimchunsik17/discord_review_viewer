@@ -29,6 +29,10 @@ export default {
       let duplicateCount = 0;
       let errorCount = 0;
 
+      // 정규식 패턴: [제목 - 생산자] 평점/5
+      // 예: [LOVE ALL SERVE ALL - Fujii Kaze] 4/5
+      const reviewRegex = /\[(.*?)\s*-\s*(.*?)\]\s*([0-9.]+)\/5/i;
+
       while (!fetchedAll) {
         const fetchOptions = { limit: batchSize };
         if (lastId) fetchOptions.before = lastId;
@@ -80,65 +84,6 @@ export default {
         }
         // Prepare for next batch
         lastId = batch.last().id;
-      }
-
-
-      // 정규식 패턴: [제목 - 생산자] 평점/5
-      // 예: [LOVE ALL SERVE ALL - Fujii Kaze] 4/5
-      const reviewRegex = /\[(.*?)\s*-\s*(.*?)\]\s*([0-9.]+)\/5/i;
-
-      for (const [id, msg] of messages) {
-        // 봇 메시지 무시
-        if (msg.author.bot) continue;
-
-        const match = msg.content.match(reviewRegex);
-        if (match) {
-          const title = match[1].trim();
-          const producer = match[2].trim();
-          const rating = parseFloat(match[3]);
-
-          // 리뷰 내용을 추출하기 위해 첫 번째 줄(포맷팅 된 줄)을 제거
-          const lines = msg.content.split('\n');
-          // 정규식이 매칭된 줄이 첫 번째 줄이라고 가정하거나, 해당 라인을 제외하고 합침
-          const contentStr = lines.filter(line => !line.match(reviewRegex)).join('\n').trim();
-
-          // 이미 저장된 메시지인지 체크 (중복 방지용으로 간단히 유저명+내용으로 확인)
-          const existingReviews = getUserReviews(msg.author.username);
-          const isDuplicate = existingReviews.some(r => r.content === contentStr && r.title === title);
-          
-          if (isDuplicate) {
-            duplicateCount++;
-            continue;
-          }
-
-          // 인터넷 검색을 통한 카테고리 추출
-          const category = await categorizeBySearch(title, producer);
-
-          // 이미지 추출 (첨부 파일 우선, 없으면 fallback 이미지)
-          let imageUrl = null;
-          const attachment = msg.attachments.first();
-          if (attachment && attachment.contentType?.startsWith('image/')) {
-            imageUrl = attachment.url;
-          } else {
-            imageUrl = getFallbackImage(category, title);
-          }
-
-          const reviewData = {
-            userId: msg.author.id,
-            username: msg.author.username,
-            title,
-            producer,
-            content: contentStr || "내용 없음",
-            rating,
-            category,
-            imageUrl,
-            // 원래 메시지가 작성된 날짜 사용
-            post_date: msg.createdAt.toISOString() 
-          };
-
-          saveReview(reviewData);
-          parsedCount++;
-        }
       }
 
       // 전체 처리 결과 보고 (총 탐색된 메시지 수는 알 수 없으나, 저장된 리뷰와 중복 수를 반환)
