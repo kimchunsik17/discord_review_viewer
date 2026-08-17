@@ -2,16 +2,21 @@
 export const categorizeBySearch = async (title, producer) => {
   try {
     const query = encodeURIComponent(`${title} ${producer}`);
-    // DuckDuckGo HTML 버전을 통한 무료 검색 (API 키 불필요)
-    const res = await fetch(`https://html.duckduckgo.com/html/?q=${query}`, {
+    // DuckDuckGo 크롤링은 차단당하기 쉬워, 무료이고 안정적인 위키백과(Wikipedia) API를 사용합니다.
+    const res = await fetch(`https://ko.wikipedia.org/w/api.php?action=query&list=search&srsearch=${query}&utf8=&format=json`, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        'User-Agent': 'DiscordReviewBot/1.0 (Contact: user@domain.com)'
       }
     });
     
-    if (!res.ok) throw new Error('Search request failed');
-    const html = await res.text();
-    const text = html.toLowerCase();
+    if (!res.ok) throw new Error(`Search request failed with status: ${res.status}`);
+    
+    const data = await res.json();
+    // 검색 결과 스니펫(요약) 텍스트를 하나로 합침
+    const text = data.query.search.map(item => item.snippet).join(' ').toLowerCase();
+    
+    // API 호출 속도 조절 (rate limit 방지)
+    await new Promise(r => setTimeout(r, 300));
     
     // 키워드 빈도수 점수 매기기
     let scores = {
@@ -32,13 +37,21 @@ export const categorizeBySearch = async (title, producer) => {
     
     // 최고 점수 카테고리 찾기
     let maxCategory = '기타';
-    let maxScore = 5; // 임계값(최소 5번 이상 연관 단어가 검색 결과에 등장해야 함)
+    let maxScore = 0; // 임계값 낮춤 (위키백과 스니펫은 짧아서 키워드가 1~2번만 나와도 인정)
 
     for (const [cat, score] of Object.entries(scores)) {
       if (score > maxScore) {
         maxScore = score;
         maxCategory = cat;
       }
+    }
+
+    // 만약 전혀 점수가 안 나왔다면, 입력된 텍스트 자체(제목/생산자)에 키워드가 있는지 한번 더 확인
+    if (maxCategory === '기타') {
+      const fallbackText = query.toLowerCase();
+      if (fallbackText.includes('영화') || fallbackText.includes('감독')) return '영화';
+      if (fallbackText.includes('음악') || fallbackText.includes('앨범') || fallbackText.includes('노래')) return '음악';
+      if (fallbackText.includes('책') || fallbackText.includes('도서')) return '도서';
     }
 
     return maxCategory;
