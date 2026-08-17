@@ -1,0 +1,94 @@
+import { SlashCommandBuilder } from 'discord.js';
+import { saveReview, getUserReviews } from '../utils/dataStore.js';
+import { categorizeBySearch, getFallbackImage } from '../utils/smartHelper.js';
+
+export default {
+  data: new SlashCommandBuilder()
+    .setName('기록불러오기')
+    .setDescription('현재 채널의 과거 채팅 기록을 분석해 리뷰 DB로 파싱합니다.')
+    .addIntegerOption(option => 
+      option.setName('개수')
+        .setDescription('가져올 과거 메시지 개수 (최대 100개, 기본 50개)')
+        .setRequired(false)
+        .setMinValue(1)
+        .setMaxValue(100)),
+        
+  async execute(interaction) {
+    // 디스코드 API 응답 지연 방지
+    await interaction.deferReply();
+    
+    const limit = interaction.options.getInteger('개수') || 50;
+    
+    try {
+      // 1. 메시지 가져오기
+      const messages = await interaction.channel.messages.fetch({ limit });
+      
+      let parsedCount = 0;
+      let duplicateCount = 0;
+      let errorCount = 0;
+
+      // 정규식 패턴: [제목 - 생산자] 평점/5
+      // 예: [LOVE ALL SERVE ALL - Fujii Kaze] 4/5
+      const reviewRegex = /\[(.*?)\s*-\s*(.*?)\]\s*([0-9.]+)\/5/i;
+
+      for (const [id, msg] of messages) {
+        // 봇 메시지 무시
+        if (msg.author.bot) continue;
+
+        const match = msg.content.match(reviewRegex);
+        if (match) {
+          const title = match[1].trim();
+          const producer = match[2].trim();
+          const rating = parseFloat(match[3]);
+
+          // 리뷰 내용을 추출하기 위해 첫 번째 줄(포맷팅 된 줄)을 제거
+          const lines = msg.content.split('\n');
+          // 정규식이 매칭된 줄이 첫 번째 줄이라고 가정하거나, 해당 라인을 제외하고 합침
+          const contentStr = lines.filter(line => !line.match(reviewRegex)).join('\n').trim();
+
+          // 이미 저장된 메시지인지 체크 (중복 방지용으로 간단히 유저명+내용으로 확인)
+          const existingReviews = getUserReviews(msg.author.username);
+          const isDuplicate = existingReviews.some(r => r.content === contentStr && r.title === title);
+          
+          if (isDuplicate) {
+            duplicateCount++;
+            continue;
+          }
+
+          // 인터넷 검색을 통한 카테고리 추출
+          const category = await categorizeBySearch(title, producer);
+
+          // 이미지 추출 (첨부 파일 우선, 없으면 fallback 이미지)
+          let imageUrl = null;
+          const attachment = msg.attachments.first();
+          if (attachment && attachment.contentType?.startsWith('image/')) {
+            imageUrl = attachment.url;
+          } else {
+            imageUrl = getFallbackImage(category, title);
+          }
+
+          const reviewData = {
+            userId: msg.author.id,
+            username: msg.author.username,
+            title,
+            producer,
+            content: contentStr || "내용 없음",
+            rating,
+            category,
+            imageUrl,
+            // 원래 메시지가 작성된 날짜 사용
+            post_date: msg.createdAt.toISOString() 
+          };
+
+          saveReview(reviewData);
+          parsedCount++;
+        }
+      }
+
+      await interaction.editReply(`✅ 과거 메시지 파싱 완료!\n- **${limit}**개의 메시지 탐색\n- **${parsedCount}**개의 리뷰 DB 저장\n- **${duplicateCount}**개의 중복 리뷰 제외`);
+    } catch (error) {
+      console.error(error);
+      await interaction.editReply('과거 메시지를 파싱하는 도중 오류가 발생했습니다. 봇의 권한을 확인해주세요.');
+    }
+  },
+};
